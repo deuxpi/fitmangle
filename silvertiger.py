@@ -2,6 +2,7 @@ import fitparse
 import matplotlib.pyplot as plt
 from matplotlib.ticker import Formatter
 import numpy as np
+from scipy import signal
 
 import sys
 
@@ -23,23 +24,31 @@ def main(filename):
             fields = [(f.name, f.units) for f in record.fields]
     fields.append(('Economy', 'cm/beat'))
     data = np.array(data)
+    timestamps = data[10:, 0]
+    data = signal.convolve(
+        np.pad(
+            data[10:, 1:], [(2, 2), (0, 0)],
+            mode='median',
+            stat_length=((10, 10), (0, 0))),
+        [[0.2]] * 5,
+        mode='valid')
 
     ignored_fields = [
-        'position_long', 'position_lat', 'timestamp', 'distance',
-        'fractional_cadence', 'enhanced_speed', 'enhanced_altitude']
+        'position_long', 'position_lat', 'timestamp', 'distance', 'cadence',
+        'altitude', 'fractional_cadence',
+        'enhanced_speed', 'enhanced_altitude']
 
     fignum = 1
     for i, (field_name, units) in enumerate(fields):
         if field_name in ignored_fields:
             continue
         plt.subplot(4, 3, fignum)
-        timestamps = data[:, 0]
         if field_name == 'speed':
             label = 'Pace'
             units = 'min/km'
         else:
             label = field_name.replace('_', ' ').capitalize()
-        plt.plot(timestamps, data[:, i], label=label)
+        plt.plot(timestamps, data[:, i - 1], label=label)
         if field_name == 'speed':
             class MinutesFormatter(Formatter):
                 def __call__(self, x, pos=None):
@@ -54,7 +63,7 @@ def main(filename):
         elif field_name == 'altitude' or field_name == 'Elevation':
             plt.ylim((-100.0, 100.0))
         else:
-            plt.ylim((0.0, 1.5 * np.percentile(data[:, i], 80)))
+            plt.ylim((0.0, 1.5 * np.percentile(data[:, i - 1], 90)))
         plt.ylabel(units)
         plt.legend()
         plt.grid(True)

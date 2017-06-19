@@ -1,3 +1,4 @@
 git+https://github.com/dtcooper/python-fitparse@master
 numpy
 matplotlib
+scipy
