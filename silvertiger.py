@@ -11,6 +11,15 @@ import sys
 sns.set(color_codes=True)
 
 
+class MinutesFormatter(Formatter):
+    def __call__(self, x, pos=None):
+        if x == 0:
+            pace = 0
+        else:
+            pace = 3600.0 / x
+        return '{}:{:02d}'.format(int(pace / 60), int(pace % 60))
+
+
 def main(filename):
     fitfile = fitparse.FitFile(
         filename,
@@ -55,6 +64,29 @@ def main(filename):
         if field_name in ignored_fields:
             continue
         series = data[:, i - 1]
+
+        if field_name == 'speed':
+            intervals = [30, 60, 300, 1800, 3600]
+            peak_speed = []
+            for interval in intervals:
+                w = np.ones(interval, dtype=float)
+                w /= w.sum()
+                peak_speed.append(max(np.convolve(w, series, mode='valid')))
+                peak_pace = 3600.0 / peak_speed[-1]
+                print '{}:{:02d} {}:{:02d}'.format(
+                    interval / 60, interval % 60,
+                    int(peak_pace / 60), int(peak_pace % 60))
+            plt.subplot(4, 3, fignum)
+            plt.semilogx(intervals, peak_speed, label='Peak pace')
+            plt.ylabel('min/km')
+            plt.gca().xaxis.set_ticks(intervals)
+            plt.gca().xaxis.set_ticklabels(
+                ["{}:{:02d}".format(i / 60, i % 60) for i in intervals])
+            plt.gca().yaxis.set_major_formatter(MinutesFormatter())
+            plt.gca().yaxis.set_minor_formatter(MinutesFormatter())
+            plt.legend()
+            fignum += 1
+
         plt.subplot(4, 3, fignum)
         if field_name == 'speed':
             label = 'Pace'
@@ -78,14 +110,6 @@ def main(filename):
                 '{:d}'.format(max_heart_rate),
                 verticalalignment='bottom')
         if field_name == 'speed':
-            class MinutesFormatter(Formatter):
-                def __call__(self, x, pos=None):
-                    if x == 0:
-                        pace = 0
-                    else:
-                        pace = 3600.0 / x
-                    return '{}:{:02d}'.format(int(pace / 60), int(pace % 60))
-
             plt.gca().yaxis.set_major_formatter(MinutesFormatter())
             plt.gca().yaxis.set_minor_formatter(MinutesFormatter())
         elif field_name == 'altitude' or field_name == 'Elevation':
