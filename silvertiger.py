@@ -20,7 +20,7 @@ class MinutesFormatter(Formatter):
         return '{}:{:02d}'.format(int(pace / 60), int(pace % 60))
 
 
-def main(filename):
+def plot_fitfile(filename):
     fitfile = fitparse.FitFile(
         filename,
         data_processor=fitparse.StandardUnitsDataProcessor(),
@@ -40,7 +40,8 @@ def main(filename):
             fields = [(f.name, f.units) for f in record.fields]
     fields.append(('Economy', 'cm/beat'))
     data = np.array(data)
-    timestamps = data[10:, 0]
+    timestamps = data[10:, 0].astype('datetime64[ms]')
+    timestamps = (timestamps - timestamps[0]).astype(float) / 60000.0
     data = signal.convolve(
         np.pad(
             data[10:, 1:], [(2, 2), (0, 0)],
@@ -55,9 +56,6 @@ def main(filename):
         'position_long', 'position_lat', 'timestamp', 'distance', 'cadence',
         'altitude', 'fractional_cadence',
         'enhanced_speed', 'enhanced_altitude']
-
-    fig = plt.figure(figsize=(40, 30))
-    fig.subplots_adjust(left=0.05, bottom=0.05, right=0.95, top=0.95)
 
     fignum = 1
     for i, (field_name, units) in enumerate(fields):
@@ -121,8 +119,12 @@ def main(filename):
         plt.grid(True)
         fignum += 1
 
-    plt.show()
-
 
 if __name__ == '__main__':
-    main(sys.argv[1])
+    fig = plt.figure(figsize=(40, 30))
+    fig.subplots_adjust(left=0.05, bottom=0.05, right=0.95, top=0.95)
+
+    for filename in sys.argv[1:]:
+        plot_fitfile(filename)
+
+    plt.show()
