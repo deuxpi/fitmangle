@@ -11,6 +11,16 @@ import sys
 sns.set(color_codes=True)
 
 
+class MinutesFormatter(Formatter):
+    def __call__(self, x, pos=None):
+        if x > 3600:
+            h = '{}:'.format(int(x / 3600))
+            x %= 3600
+        else:
+            h = ''
+        return '{}{}:{:02d}'.format(h, int(x / 60), int(x % 60))
+
+
 class PaceFormatter(Formatter):
     def __call__(self, x, pos=None):
         if x == 0:
@@ -25,20 +35,18 @@ def plot_fitfile(filename):
         filename,
         data_processor=fitparse.StandardUnitsDataProcessor(),
         check_crc=False)
-    records = fitfile.get_messages('record')
-    data = []
+    values = []
     fields = None
-    for i, record in enumerate(records):
-        data.append([f.value for f in record.fields])
+    for record in fitfile.get_messages('record'):
+        values.append([f.value for f in record.fields])
         if fields is None:
             fields = [
                 f.name.replace('_', ' ').capitalize()
                 for f in record.fields]
             units = {name: f.units for name, f in zip(fields, record.fields)}
-    data = np.array(data)
-    timestamps = data[10:, 0].astype('datetime64[ms]')
-    timestamps = (timestamps - timestamps[0]).astype(float) / 60000.0
-    df = pd.DataFrame(data[10:, 1:], columns=fields[1:], index=timestamps)
+
+    df = pd.DataFrame(values, columns=fields)
+    df.set_index('Timestamp')
 
     ignored_fields = [
         'Position long', 'Position lat', 'Timestamp', 'Distance', 'Cadence',
@@ -89,16 +97,18 @@ def plot_fitfile(filename):
             color = ax.get_lines()[-1].get_color()
             plt.axhline(y=avg_heart_rate, linestyle='--', color=color)
             plt.text(
-                timestamps[0], avg_heart_rate,
+                0, avg_heart_rate,
                 '{:d} ({:d}%)'.format(avg_heart_rate, avg_heart_rate_reserve),
                 verticalalignment='bottom')
             plt.axhline(y=max_heart_rate, linestyle='--', color=color)
             plt.text(
-                timestamps[0], max_heart_rate,
+                0, max_heart_rate,
                 '{:d}'.format(max_heart_rate),
                 verticalalignment='bottom')
 
         plt.xlabel('Time')
+        plt.gca().xaxis.set_major_formatter(MinutesFormatter())
+        plt.gca().xaxis.set_minor_formatter(MinutesFormatter())
         plt.ylim((0.0, 1.5 * np.percentile(df[field_name], 90)))
         plt.ylabel(units[field_name])
 
