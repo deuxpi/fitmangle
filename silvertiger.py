@@ -28,37 +28,17 @@ def plot_fitfile(filename):
     records = fitfile.get_messages('record')
     data = []
     fields = None
-    trimp = 0.0
     for i, record in enumerate(records):
-        speed = record.get('speed').value
-        heart_rate = record.get('heart_rate').value
-        y = (heart_rate - 60.0) / (185 - 60)
-        trimp += (y / 60.0) * 0.64 * np.exp(1.92 * y)
-        efficiency = 100000.0 * speed / 60.0 / heart_rate
-        data.append([f.value for f in record.fields] + [efficiency])
+        data.append([f.value for f in record.fields])
         if fields is None:
             fields = [
                 f.name.replace('_', ' ').capitalize()
-                for f in record.fields] + ['Economy']
+                for f in record.fields]
             units = {name: f.units for name, f in zip(fields, record.fields)}
-            units['Economy'] = 'cm/beat'
     data = np.array(data)
     timestamps = data[10:, 0].astype('datetime64[ms]')
     timestamps = (timestamps - timestamps[0]).astype(float) / 60000.0
-    if False:
-        data = np.convolve(
-            np.pad(
-                data[10:, 1:], [(2, 2), (0, 0)],
-                mode='median',
-                stat_length=((10, 10), (0, 0))),
-            [[0.2]] * 5,
-            mode='valid')
-    else:
-        data = data[10:, 1:]
-
-    print 'TRIMP: {}'.format(trimp)
-
-    df = pd.DataFrame(data, columns=fields[1:], index=timestamps)
+    df = pd.DataFrame(data[10:, 1:], columns=fields[1:], index=timestamps)
 
     ignored_fields = [
         'Position long', 'Position lat', 'Timestamp', 'Distance', 'Cadence',
@@ -70,6 +50,13 @@ def plot_fitfile(filename):
         except KeyError:
             pass
 
+    df['Economy'] = 100000.0 * df['Speed'] / 60.0 / df['Heart rate']
+    units['Economy'] = 'cm/beat'
+
+    y = (df['Heart rate'] - 60.0) / (185.0 - 60.0)
+    trimp = ((y / 60.0) * 0.64 * np.exp(y.astype(float) * 1.92)).sum()
+    print 'TRIMP: {}'.format(trimp)
+
     intervals = [30, 60, 300, 1800, 3600]
     peak_speed = []
     series = df['Speed']
@@ -77,24 +64,20 @@ def plot_fitfile(filename):
         w = np.ones(interval, dtype=float)
         w /= w.sum()
         peak_speed.append(max(np.convolve(w, series, mode='valid')))
-        peak_pace = 3600.0 / peak_speed[-1]
-        print '{}:{:02d} {}:{:02d}'.format(
-            interval / 60, interval % 60,
-            int(peak_pace / 60), int(peak_pace % 60))
     plt.subplot(3, 3, 1)
-    plt.semilogx(intervals, peak_speed, label='Peak pace')
+    plt.semilogx(intervals, peak_speed)
     plt.ylabel('min/km')
     plt.gca().xaxis.set_ticks(intervals)
     plt.gca().xaxis.set_ticklabels(
         ["{}:{:02d}".format(i / 60, i % 60) for i in intervals])
     plt.gca().yaxis.set_major_formatter(PaceFormatter())
     plt.gca().yaxis.set_minor_formatter(PaceFormatter())
-    plt.legend()
+    plt.title('Peak pace')
 
     fignum = 2
     for field_name in df.columns:
         plt.subplot(3, 3, fignum)
-        df[field_name].plot()
+        ax = df[field_name].plot()
 
         if field_name == 'Heart rate':
             series = df['Heart rate']
@@ -102,24 +85,29 @@ def plot_fitfile(filename):
             max_heart_rate = int(max(series))
             avg_heart_rate_reserve = int(
                 100.0 * (avg_heart_rate - 60.0) / (185.0 - 60.0))
-            plt.axhline(y=avg_heart_rate, linestyle='--')
+
+            color = ax.get_lines()[-1].get_color()
+            plt.axhline(y=avg_heart_rate, linestyle='--', color=color)
             plt.text(
                 timestamps[0], avg_heart_rate,
                 '{:d} ({:d}%)'.format(avg_heart_rate, avg_heart_rate_reserve),
                 verticalalignment='bottom')
-            plt.axhline(y=max_heart_rate, linestyle='--')
+            plt.axhline(y=max_heart_rate, linestyle='--', color=color)
             plt.text(
                 timestamps[0], max_heart_rate,
                 '{:d}'.format(max_heart_rate),
                 verticalalignment='bottom')
-        if field_name == 'Speed':
-            plt.gca().yaxis.set_major_formatter(PaceFormatter())
-            plt.gca().yaxis.set_minor_formatter(PaceFormatter())
 
         plt.xlabel('Time')
         plt.ylim((0.0, 1.5 * np.percentile(df[field_name], 90)))
         plt.ylabel(units[field_name])
-        plt.title(field_name)
+
+        if field_name == 'Speed':
+            plt.gca().yaxis.set_major_formatter(PaceFormatter())
+            plt.gca().yaxis.set_minor_formatter(PaceFormatter())
+            plt.title('Pace')
+        else:
+            plt.title(field_name)
 
         fignum += 1
 
