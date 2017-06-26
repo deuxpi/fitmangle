@@ -2,7 +2,7 @@ import fitparse
 import matplotlib.pyplot as plt
 from matplotlib.ticker import Formatter
 import numpy as np
-from scipy import signal
+import pandas as pd
 import seaborn as sns
 
 import sys
@@ -11,7 +11,7 @@ import sys
 sns.set(color_codes=True)
 
 
-class MinutesFormatter(Formatter):
+class PaceFormatter(Formatter):
     def __call__(self, x, pos=None):
         if x == 0:
             pace = 0
@@ -37,62 +37,67 @@ def plot_fitfile(filename):
         efficiency = 100000.0 * speed / 60.0 / heart_rate
         data.append([f.value for f in record.fields] + [efficiency])
         if fields is None:
-            fields = [(f.name, f.units) for f in record.fields]
-    fields.append(('Economy', 'cm/beat'))
+            fields = [
+                f.name.replace('_', ' ').capitalize()
+                for f in record.fields] + ['Economy']
+            units = {name: f.units for name, f in zip(fields, record.fields)}
+            units['Economy'] = 'cm/beat'
     data = np.array(data)
     timestamps = data[10:, 0].astype('datetime64[ms]')
     timestamps = (timestamps - timestamps[0]).astype(float) / 60000.0
-    data = signal.convolve(
-        np.pad(
-            data[10:, 1:], [(2, 2), (0, 0)],
-            mode='median',
-            stat_length=((10, 10), (0, 0))),
-        [[0.2]] * 5,
-        mode='valid')
+    if False:
+        data = np.convolve(
+            np.pad(
+                data[10:, 1:], [(2, 2), (0, 0)],
+                mode='median',
+                stat_length=((10, 10), (0, 0))),
+            [[0.2]] * 5,
+            mode='valid')
+    else:
+        data = data[10:, 1:]
 
     print 'TRIMP: {}'.format(trimp)
 
+    df = pd.DataFrame(data, columns=fields[1:], index=timestamps)
+
     ignored_fields = [
-        'position_long', 'position_lat', 'timestamp', 'distance', 'cadence',
-        'altitude', 'fractional_cadence',
-        'enhanced_speed', 'enhanced_altitude']
+        'Position long', 'Position lat', 'Timestamp', 'Distance', 'Cadence',
+        'Elevation', 'Altitude', 'Fractional cadence',
+        'Enhanced speed', 'Enhanced altitude']
+    for column in ignored_fields:
+        try:
+            del df[column]
+        except KeyError:
+            pass
 
-    fignum = 1
-    for i, (field_name, units) in enumerate(fields):
-        if field_name in ignored_fields:
-            continue
-        series = data[:, i - 1]
+    intervals = [30, 60, 300, 1800, 3600]
+    peak_speed = []
+    series = df['Speed']
+    for interval in intervals:
+        w = np.ones(interval, dtype=float)
+        w /= w.sum()
+        peak_speed.append(max(np.convolve(w, series, mode='valid')))
+        peak_pace = 3600.0 / peak_speed[-1]
+        print '{}:{:02d} {}:{:02d}'.format(
+            interval / 60, interval % 60,
+            int(peak_pace / 60), int(peak_pace % 60))
+    plt.subplot(3, 3, 1)
+    plt.semilogx(intervals, peak_speed, label='Peak pace')
+    plt.ylabel('min/km')
+    plt.gca().xaxis.set_ticks(intervals)
+    plt.gca().xaxis.set_ticklabels(
+        ["{}:{:02d}".format(i / 60, i % 60) for i in intervals])
+    plt.gca().yaxis.set_major_formatter(PaceFormatter())
+    plt.gca().yaxis.set_minor_formatter(PaceFormatter())
+    plt.legend()
 
-        if field_name == 'speed':
-            intervals = [30, 60, 300, 1800, 3600]
-            peak_speed = []
-            for interval in intervals:
-                w = np.ones(interval, dtype=float)
-                w /= w.sum()
-                peak_speed.append(max(np.convolve(w, series, mode='valid')))
-                peak_pace = 3600.0 / peak_speed[-1]
-                print '{}:{:02d} {}:{:02d}'.format(
-                    interval / 60, interval % 60,
-                    int(peak_pace / 60), int(peak_pace % 60))
-            plt.subplot(4, 3, fignum)
-            plt.semilogx(intervals, peak_speed, label='Peak pace')
-            plt.ylabel('min/km')
-            plt.gca().xaxis.set_ticks(intervals)
-            plt.gca().xaxis.set_ticklabels(
-                ["{}:{:02d}".format(i / 60, i % 60) for i in intervals])
-            plt.gca().yaxis.set_major_formatter(MinutesFormatter())
-            plt.gca().yaxis.set_minor_formatter(MinutesFormatter())
-            plt.legend()
-            fignum += 1
+    fignum = 2
+    for field_name in df.columns:
+        plt.subplot(3, 3, fignum)
+        df[field_name].plot()
 
-        plt.subplot(4, 3, fignum)
-        if field_name == 'speed':
-            label = 'Pace'
-            units = 'min/km'
-        else:
-            label = field_name.replace('_', ' ').capitalize()
-        plt.plot(timestamps, series, label=label)
-        if field_name == 'heart_rate':
+        if field_name == 'Heart rate':
+            series = df['Heart rate']
             avg_heart_rate = int(np.median(series))
             max_heart_rate = int(max(series))
             avg_heart_rate_reserve = int(
@@ -107,16 +112,15 @@ def plot_fitfile(filename):
                 timestamps[0], max_heart_rate,
                 '{:d}'.format(max_heart_rate),
                 verticalalignment='bottom')
-        if field_name == 'speed':
-            plt.gca().yaxis.set_major_formatter(MinutesFormatter())
-            plt.gca().yaxis.set_minor_formatter(MinutesFormatter())
-        elif field_name == 'altitude' or field_name == 'Elevation':
-            plt.ylim((-100.0, 100.0))
-        else:
-            plt.ylim((0.0, 1.5 * np.percentile(series, 90)))
-        plt.ylabel(units)
-        plt.legend()
-        plt.grid(True)
+        if field_name == 'Speed':
+            plt.gca().yaxis.set_major_formatter(PaceFormatter())
+            plt.gca().yaxis.set_minor_formatter(PaceFormatter())
+
+        plt.xlabel('Time')
+        plt.ylim((0.0, 1.5 * np.percentile(df[field_name], 90)))
+        plt.ylabel(units[field_name])
+        plt.title(field_name)
+
         fignum += 1
 
 

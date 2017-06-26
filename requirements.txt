@@ -1,5 +1,6 @@
 git+https://github.com/dtcooper/python-fitparse@master
 numpy
 matplotlib
+pandas
 scipy
 seaborn
