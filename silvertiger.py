@@ -14,11 +14,10 @@ sns.set(color_codes=True)
 class MinutesFormatter(Formatter):
     def __call__(self, x, pos=None):
         if x > 3600:
-            h = '{}:'.format(int(x / 3600))
-            x %= 3600
+            return '{}:{:02d}:{:02d}'.format(
+                int(x / 3600), int(x % 3600 / 60), int(x % 60))
         else:
-            h = ''
-        return '{}{}:{:02d}'.format(h, int(x / 60), int(x % 60))
+            return '{}:{:02d}'.format(int(x / 60), int(x % 60))
 
 
 class PaceFormatter(Formatter):
@@ -28,6 +27,9 @@ class PaceFormatter(Formatter):
         else:
             pace = 3600.0 / x
         return '{}:{:02d}'.format(int(pace / 60), int(pace % 60))
+
+
+figures = {}
 
 
 def plot_fitfile(filename):
@@ -45,11 +47,10 @@ def plot_fitfile(filename):
                 for f in record.fields]
             units = {name: f.units for name, f in zip(fields, record.fields)}
 
-    df = pd.DataFrame(values, columns=fields)
-    df.set_index('Timestamp')
+    df = pd.DataFrame(values[10:], columns=fields)
 
     ignored_fields = [
-        'Position long', 'Position lat', 'Timestamp', 'Distance', 'Cadence',
+        'Position long', 'Position lat', 'Cadence',
         'Elevation', 'Altitude', 'Fractional cadence',
         'Enhanced speed', 'Enhanced altitude']
     for column in ignored_fields:
@@ -58,12 +59,42 @@ def plot_fitfile(filename):
         except KeyError:
             pass
 
-    df['Economy'] = 100000.0 * df['Speed'] / 60.0 / df['Heart rate']
-    units['Economy'] = 'cm/beat'
+    if 'Ground time' in df.columns:
+        gt = df['Ground time']
+        df['Ground time'] = gt.where(gt < 400.0)
 
-    y = (df['Heart rate'] - 60.0) / (185.0 - 60.0)
-    trimp = ((y / 60.0) * 0.64 * np.exp(y.astype(float) * 1.92)).sum()
-    print 'TRIMP: {}'.format(trimp)
+    if 'Form power' in df.columns:
+        fp = df['Form power']
+        df['Form power'] = fp.where(fp > 20.0)
+
+    if 'Leg spring stiffness' in df.columns:
+        lss = df['Leg spring stiffness']
+        df['Leg spring stiffness'] = lss.where(lss > 5.0)
+
+    if 'Power' in df.columns:
+        pw = df['Power']
+        df['Power'] = pw.where((pw > 100.0) & (pw < 400.0))
+
+    if 'Vertical oscillation' in df.columns:
+        vo = df['Vertical oscillation']
+        df['Vertical oscillation'] = vo.where(vo > 3.0)
+
+    for column in df.columns:
+        if column in ['Distance', 'Timestamp']:
+            continue
+        w = 59
+        df[column] = np.convolve(
+            np.pad(df[column], w / 2, 'edge'),
+            np.ones(w) / w,
+            mode='valid')
+
+    if 'Heart rate' in df.columns:
+        df['Running economy'] = 1e5 * df['Speed'] / 60.0 / df['Heart rate']
+        units['Running economy'] = 'cm/beat'
+
+        y = (df['Heart rate'] - 60.0) / (185.0 - 60.0)
+        trimp = ((y / 60.0) * 0.64 * np.exp(y.astype(float) * 1.92)).sum()
+        print 'TRIMP: {}'.format(trimp)
 
     intervals = [30, 60, 300, 1800, 3600]
     peak_speed = []
@@ -82,10 +113,15 @@ def plot_fitfile(filename):
     plt.gca().yaxis.set_minor_formatter(PaceFormatter())
     plt.title('Peak pace')
 
-    fignum = 2
+    x = 'Distance'
     for field_name in df.columns:
-        plt.subplot(3, 3, fignum)
-        ax = df[field_name].plot()
+        if field_name in ['Distance', 'Timestamp']:
+            continue
+
+        if field_name not in figures:
+            figures[field_name] = len(figures) + 2
+        subplot = plt.subplot(3, 3, figures[field_name])
+        artist = df.plot(x=x, y=field_name, ax=subplot, legend=False)
 
         if field_name == 'Heart rate':
             series = df['Heart rate']
@@ -94,7 +130,7 @@ def plot_fitfile(filename):
             avg_heart_rate_reserve = int(
                 100.0 * (avg_heart_rate - 60.0) / (185.0 - 60.0))
 
-            color = ax.get_lines()[-1].get_color()
+            color = artist.get_lines()[-1].get_color()
             plt.axhline(y=avg_heart_rate, linestyle='--', color=color)
             plt.text(
                 0, avg_heart_rate,
@@ -106,10 +142,10 @@ def plot_fitfile(filename):
                 '{:d}'.format(max_heart_rate),
                 verticalalignment='bottom')
 
-        plt.xlabel('Time')
-        plt.gca().xaxis.set_major_formatter(MinutesFormatter())
-        plt.gca().xaxis.set_minor_formatter(MinutesFormatter())
-        plt.ylim((0.0, 1.5 * np.percentile(df[field_name], 90)))
+        plt.xlabel('{} ({})'.format(x, units[x]))
+        if x == 'Timestamp':
+            plt.gca().xaxis.set_major_formatter(MinutesFormatter())
+            plt.gca().xaxis.set_minor_formatter(MinutesFormatter())
         plt.ylabel(units[field_name])
 
         if field_name == 'Speed':
@@ -118,8 +154,6 @@ def plot_fitfile(filename):
             plt.title('Pace')
         else:
             plt.title(field_name)
-
-        fignum += 1
 
 
 if __name__ == '__main__':
