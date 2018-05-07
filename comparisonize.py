@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import Formatter
 import numpy as np
 import pandas as pd
+import scipy.stats
 import seaborn as sns
 
 import sys
@@ -15,9 +16,9 @@ class MinutesFormatter(Formatter):
     def __call__(self, x, pos=None):
         if x > 3600:
             return '{}:{:02d}:{:02d}'.format(
-                int(x / 3600), int(x % 3600 / 60), int(x % 60))
+                int(x // 3600), int(x % 3600 // 60), int(x % 60))
         else:
-            return '{}:{:02d}'.format(int(x / 60), int(x % 60))
+            return '{}:{:02d}'.format(int(x // 60), int(x % 60))
 
 
 class PaceFormatter(Formatter):
@@ -26,7 +27,7 @@ class PaceFormatter(Formatter):
             pace = 0
         else:
             pace = 3600.0 / x
-        return '{}:{:02d}'.format(int(pace / 60), int(pace % 60))
+        return '{}:{:02d}'.format(int(pace // 60), int(pace % 60))
 
 
 figures = {}
@@ -79,12 +80,18 @@ def plot_fitfile(filename):
         vo = df['Vertical oscillation']
         df['Vertical oscillation'] = vo.where(vo > 3.0)
 
+    pace = df['Speed']
+    df['Speed'] = pace.where(
+        abs(pace - pace.median())
+        <= pace.mad() * (2 / scipy.stats.norm.ppf(3/4.))
+    )
+
     for column in df.columns:
         if column in ['Distance', 'Timestamp']:
             continue
-        w = 59
+        w = 29
         df[column] = np.convolve(
-            np.pad(df[column], w / 2, 'edge'),
+            np.pad(df[column], w // 2, 'edge'),
             np.ones(w) / w,
             mode='valid')
 
@@ -94,21 +101,19 @@ def plot_fitfile(filename):
 
         y = (df['Heart rate'] - 60.0) / (185.0 - 60.0)
         trimp = ((y / 60.0) * 0.64 * np.exp(y.astype(float) * 1.92)).sum()
-        print 'TRIMP: {}'.format(trimp)
+        print('TRIMP: {}'.format(trimp))
 
-    intervals = [30, 60, 300, 1800, 3600]
-    peak_speed = []
-    series = df['Speed']
-    for interval in intervals:
-        w = np.ones(interval, dtype=float)
-        w /= w.sum()
-        peak_speed.append(max(np.convolve(w, series, mode='valid')))
+    intervals = [30, 60, 300, 1800, 3600, 7200]
+    s = df['Speed']
+    peak_speed = [
+        s.rolling(window=i, min_periods=1).mean().max() for i in intervals
+    ]
     plt.subplot(3, 3, 1)
     plt.semilogx(intervals, peak_speed)
     plt.ylabel('min/km')
     plt.gca().xaxis.set_ticks(intervals)
     plt.gca().xaxis.set_ticklabels(
-        ["{}:{:02d}".format(i / 60, i % 60) for i in intervals])
+        ["{}:{:02d}".format(i // 60, i % 60) for i in intervals])
     plt.gca().yaxis.set_major_formatter(PaceFormatter())
     plt.gca().yaxis.set_minor_formatter(PaceFormatter())
     plt.title('Peak pace')
@@ -125,7 +130,7 @@ def plot_fitfile(filename):
 
         if field_name == 'Heart rate':
             series = df['Heart rate']
-            avg_heart_rate = int(np.median(series))
+            avg_heart_rate = int(series.median())
             max_heart_rate = int(max(series))
             avg_heart_rate_reserve = int(
                 100.0 * (avg_heart_rate - 60.0) / (185.0 - 60.0))
