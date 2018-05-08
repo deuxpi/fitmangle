@@ -148,6 +148,11 @@ for record in fitfile.get_messages():
             'Value'
         )
         heart_rate.text = str(record.get_value('heart_rate'))
+
+        # Strava reads running cadence in Bike Cadence field...
+        cadence = ET.SubElement(trackpoint, 'Cadence')
+        cadence.text = str(record.get_value('cadence'))
+
         extensions = ET.SubElement(
             ET.SubElement(trackpoint, 'Extensions'),
             'ns3:TPX')
@@ -155,6 +160,8 @@ for record in fitfile.get_messages():
         speed.text = str(record.get_value('speed') / 3.6)
         cadence = ET.SubElement(extensions, 'ns3:RunCadence')
         cadence.text = str(record.get_value('cadence'))
+        power = ET.SubElement(extensions, 'ns3:Watts')
+        power.text = str(record.get_value('Power'))
     elif record.name == 'lap':
         lap.set('StartTime', render_timestamp(record.get_value('start_time')))
         lap.find('TotalTimeSeconds').text = '{:0.1f}'.format(
@@ -190,4 +197,5 @@ ET.SubElement(version, 'VersionMinor').text = str(v % 100)
 ET.SubElement(version, 'BuildMajor').text = '0'
 ET.SubElement(version, 'BuildMinor').text = '0'
 
+print('<?xml version="1.0" encoding="UTF-8"?>')
 ET.dump(tcx)
