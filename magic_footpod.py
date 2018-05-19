@@ -143,6 +143,7 @@ for record in fitfile.get_messages():
         position_lat.text = str(coords['position_lat'])
         distance = ET.SubElement(trackpoint, 'DistanceMeters')
         distance.text = str(record.get_value('distance') * 1000)
+        last_distance_meters = record.get_value('distance')
         heart_rate = ET.SubElement(
             ET.SubElement(trackpoint, 'HeartRateBpm'),
             'Value'
@@ -156,8 +157,12 @@ for record in fitfile.get_messages():
         extensions = ET.SubElement(
             ET.SubElement(trackpoint, 'Extensions'),
             'ns3:TPX')
+        if record.get_value('speed') is not None:
+            speed = record.get_value('speed') / 3.6
+        else:
+            speed = last_distance_meters - record.get_value('distance')
         speed = ET.SubElement(extensions, 'ns3:Speed')
-        speed.text = str(record.get_value('speed') / 3.6)
+        speed.text = str(speed)
         cadence = ET.SubElement(extensions, 'ns3:RunCadence')
         cadence.text = str(record.get_value('cadence'))
         power = ET.SubElement(extensions, 'ns3:Watts')
